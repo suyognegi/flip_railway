@@ -185,7 +185,52 @@ async def scrape_reviews(p, url, sort_type, stability_count, review_limit, queue
             print(sort_type, counter, datetime.datetime.now())
             print(sort_type, dat)
             # keeps the streaming connection alive (no extra DOM work, just the number above)
-            await queue.put({"status": f"{sort_type}: {height} items loaded", "sort": sort_type})
+            try:
+                query = """
+                    ()=>{
+                        try {
+                            let ele = [...document.getElementsByClassName('lQLKCP')[0].children]
+                                .slice(6, -4)
+                                .at(-1);
+    
+                            for (let i = 0; i <= 10; i++) {
+                                ele = ele.children[0];
+                            }
+    
+                            let head_node = ele.children[0];
+    
+                            let rating = parseFloat(
+                                head_node.children[1].textContent.slice(0, 3)
+                            ).toFixed(1);
+    
+                            let text_review = ele.children[2].innerText;
+    
+                            let last = ele.children[ele.children.length - 1];
+    
+                            let bottom_first = last.children[0].textContent.split(',');
+    
+                            let name = bottom_first[0].trim();
+                            let city = (bottom_first[1] || "").trim();
+    
+                            let ago = last.children[2]
+                                .children[0]
+                                .children[1]
+                                .textContent
+                                .split(' · ')[1];
+    
+                            return `${rating} ★ | ${text_review} | ${name} | ${city} | ${ago}`;
+    
+                        } catch (error) {
+                            return "";
+                        }
+                    }
+                """
+
+                final_data = await page.evaluate(query)
+                await queue.put({"status": final_data, "sort": sort_type})
+
+            except:
+                await queue.put({"status": f"N/A ★ | N/A | N/A | N/A | N/A", "sort": sort_type})
             counter += 1
 
         await queue.put({"__debug__": f"[{sort_type}] final extraction"})
