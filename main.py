@@ -293,10 +293,9 @@ async def get_reviews(
 
                 yield json.dumps({
                     'success': True,
+                    'product_url':url,
                     'data': aa,
-                    'count': len(x),
-                    'time': elapsed,
-                    'speed': f'{len(x) / elapsed:.1f} rev/sec'
+                    'count': len(x)
                 }) + "\n"
 
         except Exception as e:
@@ -306,9 +305,7 @@ async def get_reviews(
                 "message": f"{type(e).__name__}: {e}",
                 "data": [],
                 "all_data": [],
-                "count": 0,
-                "time": 0,
-                "speed": 0
+                "count": 0
             }) + "\n"
 
         finally:
