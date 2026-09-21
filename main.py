@@ -6,10 +6,12 @@ import traceback
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import StreamingResponse
 from playwright.async_api import async_playwright
+from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 app = FastAPI()
 
-NAV_TIMEOUT_MS = 60000  # slower servers need more than the 30s default
+NAV_TIMEOUT_MS = 60000  # Railway is slower than a laptop, 30s default is too tight
+SPOOF_UA = True         # normal Chrome user agent + India locale (set False to disable)
 
 
 def create_urls(url):
@@ -36,132 +38,134 @@ async def keep_scrolling(lst, stability_count, review_limit, sort_type):
     return len(set(lst[-stability_count:])) != 1 and lst[-1] < (review_limit + 8)
 
 
-LIVE_QUERY = """
-    ()=>{
-        try {
-            let ele = [...document.getElementsByClassName('lQLKCP')[0].children]
-                .slice(6, -4)
-                .at(-1);
-
-            for (let i = 0; i <= 10; i++) {
-                ele = ele.children[0];
-            }
-
-            let head_node = ele.children[0];
-
-            let rating = parseFloat(
-                head_node.children[1].textContent.slice(0, 3)
-            ).toFixed(1);
-
-            let text_review = ele.children[2].innerText;
-
-            let last = ele.children[ele.children.length - 1];
-
-            let bottom_first = last.children[0].textContent.split(',');
-
-            let name = bottom_first[0].trim();
-            let city = (bottom_first[1] || "").trim();
-
-            let ago = last.children[2]
-                .children[0]
-                .children[1]
-                .textContent
-                .split(' · ')[1];
-
-            return `${rating} ★ | ${text_review} | ${name} | ${city} | ${ago}`;
-
-        } catch (error) {
-            return "";
-        }
-    }
-"""
-
+# ---------------------------------------------------------------
+# YOUR ORIGINAL EXTRACTION JS (unchanged)
+# ---------------------------------------------------------------
 FINAL_QUERY = """
-    ()=>{
-        let final_data=[];
-        for (const [idx,v] of [...document.getElementsByClassName('lQLKCP')[0].children].slice(6,-4).entries()) {
-            let ele = v;
+                ()=>{
+                    let final_data=[];
+                    for (const [idx,v] of [...document.getElementsByClassName('lQLKCP')[0].children].slice(6,-4).entries()) {
+                        let ele = v;
 
-            for (let i = 0; i <= 10; i++) {
-                if (!ele || !ele.children || !ele.children[0]) {
-                    break;
+                        for (let i = 0; i <= 10; i++) {
+                            console.log(i, ele);
+
+                            if (!ele || !ele.children || !ele.children[0]) {
+                                console.log("Broke at level", i);
+                                break;
+                            }
+
+                            ele = ele.children[0];
+                        }
+
+                        let head_node = ele.children[0];
+                        let rating = head_node.children[1].textContent.slice(0, 3);
+                        let head_review = head_node.children[2].textContent;
+                        let review_for = ele.children[1].textContent;
+                        let text_review = ele.children[2].innerText; 
+
+                        let last = ele.children[ele.children.length - 1];
+                        let bottom_first = last.children[0].textContent.split(',');
+                        let name = bottom_first[0];
+                        let city = bottom_first[1] || "";
+
+                        let updown = last.children[1].children[0];
+                        let up = updown.children[0].textContent;
+                        let down = updown.children[1].textContent;
+
+                        if (up.includes('Helpful for')){
+                            up = up.split('Helpful for ')[1];
+                        } else {
+                            up = '0';
+                        }
+
+                        if (down == ''){
+                            down = '0';
+                        }
+
+                        let ago = last.children[2].children[0].children[1].textContent.split(' · ')[1];
+
+                        let media_list = []
+                        if (ele.children.length == 5){
+                            let media = ele.children[3];
+                            for (let i = 0; i <= 6; i++) {
+                                media = media.children[0];
+                            }
+                            for (const i of media.children){
+                                media_list.push(i.querySelector('img').src);
+                            }
+                        }
+
+                        let temp_data = {
+                            rating: rating,
+                            head_review: head_review,
+                            review_for: review_for,
+                            text_review: text_review,
+                            name: name,
+                            city: city,
+                            helpful: up,
+                            not_helpful: down,
+                            ago: ago,
+                            media: media_list
+                        };
+
+                        final_data.push(temp_data);
+                    }
+
+                    return final_data;
                 }
-
-                ele = ele.children[0];
-            }
-
-            let head_node = ele.children[0];
-            let rating = head_node.children[1].textContent.slice(0, 3);
-            let head_review = head_node.children[2].textContent;
-            let review_for = ele.children[1].textContent;
-            let text_review = ele.children[2].innerText;
-
-            let last = ele.children[ele.children.length - 1];
-            let bottom_first = last.children[0].textContent.split(',');
-            let name = bottom_first[0];
-            let city = bottom_first[1] || "";
-
-            let updown = last.children[1].children[0];
-            let up = updown.children[0].textContent;
-            let down = updown.children[1].textContent;
-
-            if (up.includes('Helpful for')){
-                up = up.split('Helpful for ')[1];
-            } else {
-                up = '0';
-            }
-
-            if (down == ''){
-                down = '0';
-            }
-
-            let ago = last.children[2].children[0].children[1].textContent.split(' · ')[1];
-
-            let media_list = []
-            if (ele.children.length == 5){
-                let media = ele.children[3];
-                for (let i = 0; i <= 6; i++) {
-                    media = media.children[0];
-                }
-                for (const i of media.children){
-                    media_list.push(i.querySelector('img').src);
-                }
-            }
-
-            let temp_data = {
-                rating: rating,
-                head_review: head_review,
-                review_for: review_for,
-                text_review: text_review,
-                name: name,
-                city: city,
-                helpful: up,
-                not_helpful: down,
-                ago: ago,
-                media: media_list
-            };
-
-            final_data.push(temp_data);
-        }
-
-        return final_data;
-    }
-"""
+            """
 
 
-async def scrape_reviews(browser, url, sort_type, stability_count, review_limit, queue):
-    """Scrape one sort order using its own isolated context on the shared browser."""
-    context = None
+async def scrape_reviews(p, url, sort_type, stability_count, review_limit, queue):
+    """One sort order = its own browser. All four are started at the same moment."""
+    browser = None
     try:
-        await queue.put({"__debug__": f"[{sort_type}] opening page"})
+        await queue.put({"__debug__": f"[{sort_type}] launching browser"})
 
-        context = await browser.new_context()  # default 1280x720 viewport (click coords rely on it)
-        page = await context.new_page()
-        page.set_default_timeout(NAV_TIMEOUT_MS)
+        # --- deployment-only settings (nothing to do with scrolling) ---
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--disable-dev-shm-usage"],  # Docker/Railway has a tiny /dev/shm
+        )
 
-        await page.goto(url, wait_until="networkidle", timeout=NAV_TIMEOUT_MS)
+        if SPOOF_UA:
+            major = browser.version.split(".")[0]
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                    f"(KHTML, like Gecko) Chrome/{major}.0.0.0 Safari/537.36"
+                ),
+                locale="en-IN",
+                timezone_id="Asia/Kolkata",
+                viewport={"width": 1280, "height": 720},
+            )
+            page = await context.new_page()
+        else:
+            page = await browser.new_page()
+
+        # networkidle can be slow/never fire on a server: if it times out, carry on anyway
+        try:
+            await page.goto(url, wait_until="networkidle", timeout=NAV_TIMEOUT_MS)
+        except PlaywrightTimeoutError:
+            await queue.put({"__debug__": f"[{sort_type}] networkidle timeout, continuing anyway"})
         await queue.put({"__debug__": f"[{sort_type}] page loaded"})
 
+        # If Flipkart served something else (block / captcha / error page), say exactly what
+        try:
+            await page.wait_for_selector(".lQLKCP", timeout=20000)
+        except Exception:
+            title = await page.title()
+            body = await page.evaluate(
+                "document.body ? document.body.innerText.slice(0, 300).replace(/\\s+/g, ' ') : ''"
+            )
+            raise RuntimeError(
+                f"reviews container not found | title={title!r} | url={page.url!r} | body={body!r}"
+            )
+
+        # ---------------------------------------------------------------
+        # YOUR ORIGINAL SCROLL LOGIC (unchanged)
+        # ---------------------------------------------------------------
         await page.mouse.wheel(0, 2000)
 
         bottom = 1500
@@ -180,19 +184,8 @@ async def scrape_reviews(browser, url, sort_type, stability_count, review_limit,
             dat.append(height)
             print(sort_type, counter, datetime.datetime.now())
             print(sort_type, dat)
-            try:
-                if dat[-1] > 2:
-                    final_data = await page.evaluate(LIVE_QUERY)
-                    await queue.put({
-                        "status": final_data,
-                        "sort": sort_type,
-                    })
-            except Exception:
-                await queue.put({
-                    "status": "NA ★ | NA | NA | NA | NA",
-                    "sort": sort_type,
-                })
-
+            # keeps the streaming connection alive (no extra DOM work, just the number above)
+            await queue.put({"status": f"{sort_type}: {height} items loaded", "sort": sort_type})
             counter += 1
 
         await queue.put({"__debug__": f"[{sort_type}] final extraction"})
@@ -200,22 +193,22 @@ async def scrape_reviews(browser, url, sort_type, stability_count, review_limit,
         return final_data
 
     except Exception as e:
-        # no more silent failures: tell the client why this sort order died
+        # no silent failures: the client sees why this sort order died
         await queue.put({"__debug__": f"[{sort_type}] FATAL: {type(e).__name__}: {e}"})
         traceback.print_exc()
         return []
 
     finally:
-        if context is not None:
+        if browser is not None:
             try:
-                await context.close()
+                await browser.close()
             except Exception:
                 pass
 
 
-async def worker(browser, key, url, stability_count, review_limit, queue):
+async def worker(p, key, url, stability_count, review_limit, queue):
     try:
-        result = await scrape_reviews(browser, url, key, stability_count, review_limit, queue)
+        result = await scrape_reviews(p, url, key, stability_count, review_limit, queue)
         await queue.put({"__terminal__": "DONE", "sort": key, "data": result})
     except Exception as e:
         await queue.put({"__terminal__": "ERROR", "sort": key, "error": str(e)})
@@ -252,18 +245,13 @@ async def get_reviews(
 
     async def event_gen():
         tasks = []
-        browser = None
         try:
             async with async_playwright() as p:
-                # ONE browser shared by all four sort orders (much lighter than four browsers)
-                browser = await p.chromium.launch(
-                    headless=True,
-                    args=["--disable-dev-shm-usage"],
-                )
-                await queue.put({"__debug__": f"browser started, sorts={keys}"})
+                await queue.put({"__debug__": f"started, sorts={keys}"})
 
+                # four tasks created together -> four browsers launch simultaneously
                 tasks = [
-                    asyncio.create_task(worker(browser, k, urls_[k], const_alpha, limit, queue))
+                    asyncio.create_task(worker(p, k, urls_[k], const_alpha, limit, queue))
                     for k in keys
                 ]
 
@@ -285,7 +273,7 @@ async def get_reviews(
 
                     yield json.dumps(ev) + "\n"
 
-                # flush any debug/status events still waiting in the queue
+                # flush anything still waiting in the queue
                 while not queue.empty():
                     ev = queue.get_nowait()
                     if "__terminal__" not in ev:
