@@ -11,7 +11,7 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 app = FastAPI()
 
 NAV_TIMEOUT_MS = 60000  # Railway is slower than a laptop, 30s default is too tight
-SPOOF_UA = True         # normal Chrome user agent + India locale (set False to disable)
+SPOOF_UA = True  # normal Chrome user agent + India locale (set False to disable)
 
 
 def create_urls(url):
@@ -192,34 +192,34 @@ async def scrape_reviews(p, url, sort_type, stability_count, review_limit, queue
                             let ele = [...document.getElementsByClassName('lQLKCP')[0].children]
                                 .slice(6, -4)
                                 .at(-1);
-    
+
                             for (let i = 0; i <= 10; i++) {
                                 ele = ele.children[0];
                             }
-    
+
                             let head_node = ele.children[0];
-    
+
                             let rating = parseFloat(
                                 head_node.children[1].textContent.slice(0, 3)
                             ).toFixed(1);
-    
+
                             let text_review = ele.children[2].innerText;
-    
+
                             let last = ele.children[ele.children.length - 1];
-    
+
                             let bottom_first = last.children[0].textContent.split(',');
-    
+
                             let name = bottom_first[0].trim();
                             let city = (bottom_first[1] || "").trim();
-    
+
                             let ago = last.children[2]
                                 .children[0]
                                 .children[1]
                                 .textContent
                                 .split(' · ')[1];
-    
+
                             return `${rating} ★ | ${text_review} | ${name} | ${city} | ${ago}`;
-    
+
                         } catch (error) {
                             return "";
                         }
@@ -275,9 +275,9 @@ def health():
 
 @app.get("/reviews")
 async def get_reviews(
-    url: str = Query(...),
-    const_alpha: int = Query(8, ge=3, le=20),
-    limit: int = Query(93, ge=0, le=1500),
+        url: str = Query(...),
+        const_alpha: int = Query(8, ge=3, le=20),
+        limit: int = Query(93, ge=0, le=1500),
 ):
     try:
         urls_ = create_urls(url)
@@ -338,7 +338,7 @@ async def get_reviews(
 
                 yield json.dumps({
                     'success': True,
-                    'product_url':url,
+                    'product_url': url,
                     'data': aa,
                     'count': len(x)
                 }) + "\n"
