@@ -38,85 +38,99 @@ async def keep_scrolling(lst, stability_count, review_limit, sort_type):
     return len(set(lst[-stability_count:])) != 1 and lst[-1] < (review_limit + 8)
 
 
-# ---------------------------------------------------------------
-# YOUR ORIGINAL EXTRACTION JS (unchanged)
-# ---------------------------------------------------------------
 FINAL_QUERY = """
-                ()=>{
-                    let final_data=[];
-                    for (const [idx,v] of [...document.getElementsByClassName('lQLKCP')[0].children].slice(6,-4).entries()) {
-                        let ele = v;
+() => {
+    const NA = 'N/A';
 
-                        for (let i = 0; i <= 10; i++) {
-                            console.log(i, ele);
+    // run fn; on any error (element not found, undefined, etc.) or empty result -> 'N/A'
+    const safe = (fn, fallback = NA) => {
+        try {
+            const v = fn();
+            if (v === undefined || v === null) return fallback;
+            if (typeof v === 'string' && v.trim() === '') return fallback;
+            return v;
+        } catch (e) {
+            return fallback;
+        }
+    };
 
-                            if (!ele || !ele.children || !ele.children[0]) {
-                                console.log("Broke at level", i);
-                                break;
-                            }
+    let final_data = [];
 
-                            ele = ele.children[0];
-                        }
+    const container = document.getElementsByClassName('lQLKCP')[0];
+    if (!container) return final_data;
 
-                        let head_node = ele.children[0];
-                        let rating = head_node.children[1].textContent.slice(0, 3);
-                        let head_review = head_node.children[2].textContent;
-                        let review_for = ele.children[1].textContent;
-                        let text_review = ele.children[2].innerText; 
+    for (const v of [...container.children].slice(6, -4)) {
+        try {
+            let ele = v;
 
-                        let last = ele.children[ele.children.length - 1];
-                        let bottom_first = last.children[0].textContent.split(',');
-                        let name = bottom_first[0];
-                        let city = bottom_first[1] || "";
+            for (let i = 0; i <= 10; i++) {
+                if (!ele || !ele.children || !ele.children[0]) break;
+                ele = ele.children[0];
+            }
 
-                        let updown = last.children[1].children[0];
-                        let up = updown.children[0].textContent;
-                        let down = updown.children[1].textContent;
+            const head_node = safe(() => ele.children[0], null);
+            const last = safe(() => ele.children[ele.children.length - 1], null);
 
-                        if (up.includes('Helpful for')){
-                            up = up.split('Helpful for ')[1];
-                        } else {
-                            up = '0';
-                        }
+            const rating      = safe(() => head_node.children[1].textContent.slice(0, 3));
+            const head_review = safe(() => head_node.children[2].textContent);
+            const review_for  = safe(() => ele.children[1].textContent);
+            const text_review = safe(() => ele.children[2].innerText);
 
-                        if (down == ''){
-                            down = '0';
-                        }
+            const bottom_first = safe(() => last.children[0].textContent.split(','), []);
+            const name = safe(() => bottom_first[0]);
+            const city = safe(() => bottom_first[1]);
 
-                        let ago = last.children[2].children[0].children[1].textContent.split(' · ')[1];
+            let up = safe(() => {
+                const t = last.children[1].children[0].children[0].textContent;
+                return t.includes('Helpful for') ? t.split('Helpful for ')[1] : '0';
+            });
 
-                        let media_list = []
-                        if (ele.children.length == 5){
-                            let media = ele.children[3];
-                            for (let i = 0; i <= 6; i++) {
-                                media = media.children[0];
-                            }
-                            for (const i of media.children){
-                                media_list.push(i.querySelector('img').src);
-                            }
-                        }
+            let down = safe(() => {
+                const t = last.children[1].children[0].children[1].textContent;
+                return t === '' ? '0' : t;
+            });
 
-                        let temp_data = {
-                            rating: rating,
-                            head_review: head_review,
-                            review_for: review_for,
-                            text_review: text_review,
-                            name: name,
-                            city: city,
-                            helpful: up,
-                            not_helpful: down,
-                            ago: ago,
-                            media: media_list
-                        };
+            const ago = safe(() => last.children[2].children[0].children[1].textContent.split(' · ')[1]);
 
-                        final_data.push(temp_data);
+            let media_list = [];
+            try {
+                if (ele.children.length == 5) {
+                    let media = ele.children[3];
+                    for (let i = 0; i <= 6; i++) media = media.children[0];
+                    for (const m of media.children) {
+                        const src = safe(() => m.querySelector('img').src, null);
+                        if (src) media_list.push(src);
                     }
-
-                    return final_data;
                 }
-            """
+            } catch (e) {
+                media_list = [];
+            }
 
+            final_data.push({
+                rating: rating,
+                head_review: head_review,
+                review_for: review_for,
+                text_review: text_review,
+                name: name,
+                city: city,
+                helpful: up,
+                not_helpful: down,
+                ago: ago,
+                media: media_list
+            });
+        } catch (e) {
+            // whole review element was unusable: fill everything with N/A
+            final_data.push({
+                rating: NA, head_review: NA, review_for: NA, text_review: NA,
+                name: NA, city: NA, helpful: NA, not_helpful: NA, ago: NA,
+                media: []
+            });
+        }
+    }
 
+    return final_data;
+}
+"""
 async def scrape_reviews(p, url, sort_type, stability_count, review_limit, queue):
     """One sort order = its own browser. All four are started at the same moment."""
     browser = None
